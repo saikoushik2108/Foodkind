@@ -1,0 +1,50 @@
+version: '3.8'
+
+services:
+  mongodb:
+    image: mongo:7-jammy
+    container_name: foodkind-mongodb
+    restart: always
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_DATABASE: foodkind
+    volumes:
+      - mongo_data:/data/db
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: foodkind-backend
+    restart: always
+    ports:
+      - "5050:5050"
+    environment:
+      NODE_ENV: production
+      PORT: 5050
+      MONGODB_URI: mongodb://mongodb:27017/foodkind
+      JWT_SECRET: production-secret-key-change-this-foodkind-2026
+      COOKIE_SECRET: production-cookie-secret-change-this-foodkind-2026
+      CORS_ORIGIN: http://localhost:80
+      UPLOAD_DIR: uploads
+      MAX_UPLOAD_SIZE_MB: 10
+    volumes:
+      - backend_uploads:/app/uploads
+    depends_on:
+      - mongodb
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: foodkind-frontend
+    restart: always
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+
+volumes:
+  mongo_data:
+  backend_uploads:

@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: foodkind-backend
+    runtime: node
+    rootDir: backend
+    buildCommand: npm ci
+    startCommand: npm start
+    plan: free
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 5050
+      - key: MONGODB_URI
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: COOKIE_SECRET
+        generateValue: true
+      - key: CORS_ORIGIN
+        sync: false
+      - key: UPLOAD_DIR
+        value: uploads
+      - key: MAX_UPLOAD_SIZE_MB
+        value: 10

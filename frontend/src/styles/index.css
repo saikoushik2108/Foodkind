@@ -1,0 +1,5 @@
+/* Foodkind stylesheet entry. Import order matters: tokens → base → components → layout. */
+@import './variables.css';
+@import './base.css';
+@import './components.css';
+@import './layout.css';
