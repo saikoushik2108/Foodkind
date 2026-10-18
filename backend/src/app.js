@@ -71,19 +71,27 @@ app.get('/api/v1/health', (_req, res) => {
   res.json({ status: 'ok', name: 'foodkind-api', timestamp: new Date().toISOString() });
 });
 
-// Mount API v1 routes
-app.use('/api/v1/auth', authRouter);
-app.use('/api/v1/organizations', organizationsRouter);
-app.use('/api/v1/donations', donationsRouter);
-app.use('/api/v1/reservations', reservationsRouter);
-app.use('/api/v1/demand-requests', demandRequestsRouter);
-app.use('/api/v1/pickups', pickupsRouter);
-app.use('/api/v1/predictions', predictionsRouter);
-app.use('/api/v1/notifications', notificationsRouter);
-app.use('/api/v1/analytics', analyticsRouter);
-app.use('/api/v1/incidents', incidentsRouter);
-app.use('/api/v1/uploads', uploadsRouter);
-app.use('/api/v1/admin', adminRouter);
+// Mount API routes with flexible prefixes (/api/v1, /api, and direct)
+const apiRoutes = [
+  ['/auth', authRouter],
+  ['/organizations', organizationsRouter],
+  ['/donations', donationsRouter],
+  ['/reservations', reservationsRouter],
+  ['/demand-requests', demandRequestsRouter],
+  ['/pickups', pickupsRouter],
+  ['/predictions', predictionsRouter],
+  ['/notifications', notificationsRouter],
+  ['/analytics', analyticsRouter],
+  ['/incidents', incidentsRouter],
+  ['/uploads', uploadsRouter],
+  ['/admin', adminRouter],
+];
+
+for (const [prefix, router] of apiRoutes) {
+  app.use(`/api/v1${prefix}`, router);
+  app.use(`/api${prefix}`, router);
+  app.use(prefix, router);
+}
 
 // 404 handler for API routes
 app.use('/api/*', (req, res) => {
