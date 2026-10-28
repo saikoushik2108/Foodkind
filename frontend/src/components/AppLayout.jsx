@@ -34,7 +34,7 @@ import { Badge, Button } from './ui.jsx';
  * the same rules independently.
  */
 function useNavigation() {
-  const { role, organization, isDonor, isRecipient, isPartner } = useAuth();
+  const { role, organization, isDonor, isRecipient, isPartner, isVolunteer, isAgent } = useAuth();
   const isAdmin = role === 'ADMIN';
 
   const groups = [];
@@ -47,21 +47,14 @@ function useNavigation() {
     main.push({ to: '/predictions', label: 'Surplus forecast', icon: Sparkles });
   }
 
-  if (isRecipient) {
-    main.push({ to: '/marketplace', label: 'Find food', icon: Search });
-    main.push({ to: '/demand-requests', label: 'Our demand', icon: HeartHandshake });
+  if (isRecipient || isAgent || isVolunteer) {
+    main.push({ to: '/marketplace', label: isAgent ? 'Find surplus' : 'Find food', icon: Search });
+    main.push({ to: '/demand-requests', label: isAgent ? 'Shelter demand' : 'Our demand', icon: HeartHandshake });
   }
 
-  main.push({ to: '/reservations', label: isDonor ? 'Reservations' : 'Our reservations', icon: ClipboardList });
+  main.push({ to: '/reservations', label: isDonor ? 'Reservations' : (isAgent ? 'Reservations' : 'Our reservations'), icon: ClipboardList });
 
-  if (isPartner || isRecipient || isDonor) {
-    main.push({ to: '/pickups', label: 'Pickups', icon: Truck });
-  }
-
-  if (role === 'VOLUNTEER') {
-    // Volunteers drive the pickup queue; keep their navigation minimal.
-    return [{ label: 'Delivery', items: [{ to: '/pickups', label: 'My pickups', icon: Truck }, ...main.filter((m) => m.to === '/dashboard')] }];
-  }
+  main.push({ to: '/pickups', label: isAgent ? 'Rescue pickups' : 'Pickups', icon: Truck });
 
   groups.push({ label: 'Operations', items: main });
 

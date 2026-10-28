@@ -6,6 +6,7 @@ const pickupTaskSchema = new mongoose.Schema({
   donor:         { type: mongoose.Schema.Types.ObjectId, ref: 'Organization', required: true },
   recipient:     { type: mongoose.Schema.Types.ObjectId, ref: 'Organization', required: true },
   assignedTo:    { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+  assignedPartner: { type: mongoose.Schema.Types.ObjectId, ref: 'Organization', default: null },
   assignmentType: { type: String, enum: ['VOLUNTEER','PARTNER','RECIPIENT_SELF_PICKUP'], default: 'RECIPIENT_SELF_PICKUP' },
   status: {
     type: String,
@@ -14,11 +15,19 @@ const pickupTaskSchema = new mongoose.Schema({
   },
   handoverCode:  { type: String, default: '' },
   quantity:      { type: Number, required: true },
+  collectedQuantity: { type: Number, default: 0 },
+  deliveredQuantity: { type: Number, default: 0 },
   scheduledAt:   { type: Date },
+  windowStart:   { type: Date },
+  windowEnd:     { type: Date },
   arrivedAt:     { type: Date },
   collectedAt:   { type: Date },
   deliveredAt:   { type: Date },
   completedAt:   { type: Date },
+  failure: {
+    reason:      { type: String, default: '' },
+    at:          { type: Date },
+  },
   issue: {
     type:        { type: String, default: '' },
     description: { type: String, default: '' },

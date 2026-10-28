@@ -81,6 +81,8 @@ export function AuthProvider({ children }) {
       isDonor: organization?.type === 'DONOR',
       isRecipient: organization?.type === 'RECIPIENT',
       isPartner: organization?.type === 'PARTNER',
+      isVolunteer: user?.membershipRole === 'VOLUNTEER' || organization?.type === 'PARTNER',
+      isAgent: user?.membershipRole === 'VOLUNTEER' || organization?.type === 'PARTNER',
       isVerified: organization?.verificationStatus === 'APPROVED',
       login,
       register,

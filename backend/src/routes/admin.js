@@ -7,6 +7,8 @@ import { PickupTask } from '../models/PickupTask.js';
 import { Incident } from '../models/Incident.js';
 import { AuditLog } from '../models/AuditLog.js';
 import { Reservation } from '../models/Reservation.js';
+import { serializeDonation } from './donations.js';
+import { serializePickupTask } from './pickups.js';
 
 const router = Router();
 
@@ -226,17 +228,33 @@ router.post('/users/:id/status', async (req, res, next) => {
 /* ── Donations Management ────────────────────────────────────────────── */
 router.get('/donations', async (req, res, next) => {
   try {
-    const { status, search } = req.query;
+    const { status, search, page = 1, limit = 20 } = req.query;
     const filter = {};
     if (status) filter.status = status;
     if (search) filter.title = { $regex: search, $options: 'i' };
 
-    const items = await Donation.find(filter)
-      .populate('donor', 'name address')
-      .populate('createdBy', 'name email')
-      .sort({ createdAt: -1 });
+    const skip = (Number(page) - 1) * Number(limit);
+    const [items, total] = await Promise.all([
+      Donation.find(filter)
+        .populate('donor', 'name address location')
+        .populate('createdBy', 'name email')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(Number(limit)),
+      Donation.countDocuments(filter),
+    ]);
 
-    res.json({ success: true, data: items });
+    const serialized = items.map((item) => serializeDonation(item, null, true));
+    res.json({
+      success: true,
+      data: serialized,
+      pagination: {
+        page: Number(page),
+        limit: Number(limit),
+        total,
+        totalPages: Math.ceil(total / Number(limit)),
+      },
+    });
   } catch (err) { next(err); }
 });
 
@@ -258,7 +276,7 @@ router.post('/donations/:id/cancel', async (req, res, next) => {
       details: { reason, releaseDonation },
     });
 
-    res.json({ success: true, data: donation });
+    res.json({ success: true, data: serializeDonation(donation, null, true) });
   } catch (err) { next(err); }
 });
 
@@ -280,9 +298,9 @@ router.get('/donations/:id/trace', async (req, res, next) => {
     res.json({
       success: true,
       data: {
-        donation,
+        donation: serializeDonation(donation, null, true),
         reservations,
-        pickups,
+        pickups: pickups.map(serializePickupTask),
         incidents,
         auditLogs: logs,
       },
@@ -293,37 +311,77 @@ router.get('/donations/:id/trace', async (req, res, next) => {
 /* ── Pickups Management ──────────────────────────────────────────────── */
 router.get('/pickups', async (req, res, next) => {
   try {
-    const { status } = req.query;
+    const { status, page = 1, limit = 20 } = req.query;
     const filter = {};
     if (status) filter.status = status;
 
-    const items = await PickupTask.find(filter)
-      .populate('donor', 'name address')
-      .populate('recipient', 'name address')
-      .populate('donation', 'title quantity unit status')
-      .populate('assignedTo', 'name email phone')
-      .sort({ createdAt: -1 });
+    const skip = (Number(page) - 1) * Number(limit);
+    const [items, total] = await Promise.all([
+      PickupTask.find(filter)
+        .populate('donor', 'name address location')
+        .populate('recipient', 'name address location')
+        .populate('donation')
+        .populate('assignedTo', 'name email phone role')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(Number(limit)),
+      PickupTask.countDocuments(filter),
+    ]);
 
-    res.json({ success: true, data: items });
+    const serialized = items.map(serializePickupTask);
+    res.json({
+      success: true,
+      data: serialized,
+      pagination: {
+        page: Number(page),
+        limit: Number(limit),
+        total,
+        totalPages: Math.ceil(total / Number(limit)),
+      },
+    });
   } catch (err) { next(err); }
 });
 
 /* ── Incidents Management ────────────────────────────────────────────── */
 router.get('/incidents', async (req, res, next) => {
   try {
-    const { status, severity } = req.query;
+    const { status, severity, type, page = 1, limit = 20 } = req.query;
     const filter = {};
     if (status) filter.status = status;
     if (severity) filter.severity = severity;
+    if (type) filter.type = type;
 
-    const items = await Incident.find(filter)
-      .populate('donation', 'title status quantity')
-      .populate('pickup', 'status scheduledAt')
-      .populate('reportedBy', 'name email')
-      .populate('organization', 'name type')
-      .sort({ createdAt: -1 });
+    const skip = (Number(page) - 1) * Number(limit);
+    const [items, total] = await Promise.all([
+      Incident.find(filter)
+        .populate('donation')
+        .populate('pickup')
+        .populate('reportedBy', 'name email')
+        .populate('organization', 'name type')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(Number(limit)),
+      Incident.countDocuments(filter),
+    ]);
 
-    res.json({ success: true, data: items });
+    const formatted = items.map((inc) => {
+      const obj = inc.toObject ? inc.toObject() : { ...inc };
+      obj.title = obj.title || `${(obj.type || 'INCIDENT').replace(/_/g, ' ')}: ${(obj.description || '').slice(0, 35)}...`;
+      obj.reporter = obj.reportedBy;
+      obj.pickupTask = obj.pickup;
+      return obj;
+    });
+
+    res.json({
+      success: true,
+      data: formatted,
+      pagination: {
+        page: Number(page),
+        limit: Number(limit),
+        total,
+        totalPages: Math.ceil(total / Number(limit)),
+      },
+    });
   } catch (err) { next(err); }
 });
 
