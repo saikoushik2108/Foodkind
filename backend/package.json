@@ -7,7 +7,9 @@
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
     "seed": "node src/seed/seed.js",
-    "seed:clear": "node src/seed/seed.js --clear"
+    "seed:clear": "node src/seed/seed.js --clear",
+    "user": "node src/scripts/manage-user.js",
+    "db:clear-mock": "node src/scripts/clear-mock-data.js"
   },
   "dependencies": {
     "bcrypt": "^5.1.1",

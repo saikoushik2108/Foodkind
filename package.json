@@ -1,0 +1,14 @@
+{
+  "name": "foodkind-root",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node dev.js",
+    "dev:backend": "npm --prefix backend run dev",
+    "dev:frontend": "npm --prefix frontend run dev",
+    "start": "node dev.js",
+    "seed": "npm --prefix backend run seed",
+    "build": "npm --prefix frontend run build"
+  }
+}

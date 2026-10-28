@@ -157,6 +157,7 @@ router.post('/:id/pickup', requireAuth, async (req, res, next) => {
       recipient: item.recipient,
       assignedTo: req.body.assignedTo || (req.body.assignmentType === 'RECIPIENT_SELF_PICKUP' ? req.user._id : null),
       assignmentType: req.body.assignmentType || 'RECIPIENT_SELF_PICKUP',
+      status: req.body.assignedTo || req.body.assignmentType === 'RECIPIENT_SELF_PICKUP' ? 'ASSIGNED' : 'PENDING_ACCEPTANCE',
       quantity: item.quantity,
       expectedQuantity: item.quantity,
       handoverCode,

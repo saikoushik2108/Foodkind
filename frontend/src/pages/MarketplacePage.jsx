@@ -1,8 +1,9 @@
 import { useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { Filter, LayoutGrid, Map as MapIcon, Search, SlidersHorizontal } from 'lucide-react';
+import { Link, useSearchParams } from 'react-router-dom';
+import { LayoutGrid, Map as MapIcon, MapPin, RefreshCw, Utensils } from 'lucide-react';
 import { donationApi } from '../api/resources.js';
 import { useApi, usePagination } from '../hooks/useApi.js';
+import { useCurrentLocation } from '../hooks/useCurrentLocation.js';
 import {
   Alert,
   AllocationMeter,
@@ -14,35 +15,23 @@ import {
   LoadingBlock,
   PageHeader,
   Pagination,
-  Select,
   StatusBadge,
-  Input,
   formatDate,
   formatQuantity,
   humanize,
 } from '../components/ui.jsx';
 import { MapView } from '../components/MapView.jsx';
-import { DIETARY_CLASSIFICATIONS, FOOD_CATEGORIES, STORAGE_REQUIREMENTS, UNITS, toOptions } from '../constants/domain.js';
 
 const idOf = (record) => record?.id || record?._id;
 
-const emptyFilters = {
-  q: '',
-  foodCategory: '',
-  dietary: '',
-  unit: '',
-  storageRequirement: '',
-  city: '',
-  minQuantity: '',
-  sort: 'deadline',
-  selfPickupOnly: false,
-};
-
-/** Food discovery for recipient organizations. */
+/** Food discovery showing all available surplus listings for recipients and volunteers. */
 export function MarketplacePage() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const initialSort = searchParams.get('sort') || 'distance';
+
+  const { coords, source: geoSource, isDetecting: isDetectingGeo, detectLocation, statusMessage: geoMessage } = useCurrentLocation();
   const { pagination, setPage } = usePagination({ page: 1, limit: 12 });
-  const [filters, setFilters] = useState(emptyFilters);
-  const [applied, setApplied] = useState(emptyFilters);
+  const [sort, setSort] = useState(initialSort);
   const [view, setView] = useState('grid');
 
   const { data, error, loading, reload } = useApi(
@@ -50,17 +39,12 @@ export function MarketplacePage() {
       donationApi.list({
         page: pagination.page,
         limit: pagination.limit,
-        q: applied.q || undefined,
-        foodCategory: applied.foodCategory || undefined,
-        dietary: applied.dietary || undefined,
-        unit: applied.unit || undefined,
-        storageRequirement: applied.storageRequirement || undefined,
-        city: applied.city || undefined,
-        minQuantity: applied.minQuantity || undefined,
-        sort: applied.sort,
-        selfPickupOnly: applied.selfPickupOnly ? 'true' : undefined,
+        lat: coords?.lat,
+        lng: coords?.lng,
+        sort,
       }),
-    [pagination.page, pagination.limit, applied]
+    [pagination.page, pagination.limit, sort, coords?.lat, coords?.lng],
+    { pollInterval: 6000 }
   );
 
   const mapPoints = useMemo(
@@ -75,27 +59,21 @@ export function MarketplacePage() {
     [data]
   );
 
-  function applyFilters(event) {
-    event.preventDefault();
+  function handleSortChange(newSort) {
+    setSort(newSort);
     setPage(1);
-    setApplied(filters);
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set('sort', newSort);
+      return next;
+    });
   }
-
-  function clearFilters() {
-    setFilters(emptyFilters);
-    setApplied(emptyFilters);
-    setPage(1);
-  }
-
-  const activeFilterCount = Object.entries(applied).filter(
-    ([key, value]) => value && key !== 'sort'
-  ).length;
 
   return (
     <div className="page">
       <PageHeader
         title="Find surplus food"
-        subtitle="Verified listings from canteens, restaurants, hostels, caterers and event organizers near you. Reserve what your kitchen can genuinely collect and use."
+        subtitle="All available surplus food ready for rescue and claim, ordered by proximity to your current location."
         actions={
           <>
             <Button
@@ -121,97 +99,78 @@ export function MarketplacePage() {
       />
 
       <Card>
-        <form className="card-body" onSubmit={applyFilters}>
-          <div className="form-grid">
-            <label className="field span-2">
-              <span className="field-label">Search listings</span>
-              <span className="row">
-                <Search size={16} aria-hidden="true" />
-                <input
-                  className="input"
-                  type="search"
-                  placeholder="Title or description, e.g. biryani, sandwiches, fruit"
-                  value={filters.q}
-                  onChange={(event) => setFilters((f) => ({ ...f, q: event.target.value }))}
-                />
+        <div
+          style={{
+            padding: 'var(--space-3) var(--space-4)',
+            background: 'var(--surface-muted)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: 'var(--space-3)',
+          }}
+        >
+          <div className="row" style={{ gap: 'var(--space-2)' }}>
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: 28,
+                height: 28,
+                borderRadius: '50%',
+                background: geoSource === 'gps' ? 'var(--green-muted)' : 'var(--surface)',
+                color: geoSource === 'gps' ? 'var(--green)' : 'var(--primary)',
+              }}
+            >
+              <MapPin size={16} aria-hidden="true" />
+            </span>
+            <div>
+              <span className="small strong">
+                Location: {coords?.label || 'Current GPS'}
               </span>
-            </label>
-            <Select
-              label="Food category"
-              value={filters.foodCategory}
-              onChange={(event) => setFilters((f) => ({ ...f, foodCategory: event.target.value }))}
-              options={[{ value: '', label: 'Any category' }, ...toOptions(FOOD_CATEGORIES)]}
-            />
-            <Select
-              label="Dietary"
-              value={filters.dietary}
-              onChange={(event) => setFilters((f) => ({ ...f, dietary: event.target.value }))}
-              options={[{ value: '', label: 'Any dietary type' }, ...toOptions(DIETARY_CLASSIFICATIONS)]}
-            />
-            <Select
-              label="Storage requirement"
-              value={filters.storageRequirement}
-              onChange={(event) => setFilters((f) => ({ ...f, storageRequirement: event.target.value }))}
-              options={[{ value: '', label: 'Any storage' }, ...toOptions(STORAGE_REQUIREMENTS)]}
-            />
-            <Select
-              label="Unit"
-              value={filters.unit}
-              onChange={(event) => setFilters((f) => ({ ...f, unit: event.target.value }))}
-              options={[{ value: '', label: 'Portions or kilograms' }, ...toOptions(UNITS)]}
-            />
-            <Input
-              label="City contains"
-              value={filters.city}
-              onChange={(event) => setFilters((f) => ({ ...f, city: event.target.value }))}
-              placeholder="e.g. Bengaluru"
-            />
-            <Input
-              label="Minimum quantity"
-              type="number"
-              min="0"
-              value={filters.minQuantity}
-              onChange={(event) => setFilters((f) => ({ ...f, minQuantity: event.target.value }))}
-            />
-            <Select
-              label="Sort by"
-              value={filters.sort}
-              onChange={(event) => setFilters((f) => ({ ...f, sort: event.target.value }))}
-              options={[
-                { value: 'deadline', label: 'Closing soonest' },
-                { value: 'newest', label: 'Newest first' },
-              ]}
-            />
-            <label className="checkbox-row span-2" htmlFor="selfPickupOnly">
-              <input
-                id="selfPickupOnly"
-                type="checkbox"
-                checked={filters.selfPickupOnly}
-                onChange={(event) => setFilters((f) => ({ ...f, selfPickupOnly: event.target.checked }))}
-              />
-              <span>
-                <span className="strong small" style={{ display: 'block' }}>
-                  Only listings we can collect ourselves
-                </span>
-                <span className="tiny muted">Excludes listings that require a partner or volunteer collection.</span>
-              </span>
-            </label>
+              {coords?.lat ? <span className="tiny muted ml-1">({coords.lat.toFixed(4)}, {coords.lng.toFixed(4)})</span> : null}
+              {geoSource === 'gps' ? (
+                <Badge variant="success" style={{ marginLeft: 'var(--space-2)' }}>
+                  Live GPS
+                </Badge>
+              ) : (
+                <Badge variant="neutral" style={{ marginLeft: 'var(--space-2)' }}>
+                  Base Station
+                </Badge>
+              )}
+              {geoMessage ? <div className="tiny muted">{geoMessage}</div> : null}
+            </div>
           </div>
 
-          <div className="row-wrap mt-4">
-            <Button type="submit" variant="primary" icon={Filter}>
-              Apply filters
+          <div className="row" style={{ gap: 'var(--space-3)' }}>
+            <div className="row" style={{ gap: 'var(--space-2)' }}>
+              <span className="tiny muted strong" style={{ whiteSpace: 'nowrap' }}>Sort by:</span>
+              <select
+                className="input small"
+                style={{ width: 'auto', padding: '4px 10px', height: 32 }}
+                value={sort}
+                onChange={(e) => handleSortChange(e.target.value)}
+                aria-label="Sort options"
+              >
+                <option value="distance">Nearest to my location</option>
+                <option value="deadline">Closing soonest</option>
+                <option value="newest">Newest first</option>
+              </select>
+            </div>
+
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              icon={RefreshCw}
+              loading={isDetectingGeo}
+              onClick={detectLocation}
+            >
+              Detect GPS
             </Button>
-            <Button type="button" variant="secondary" icon={SlidersHorizontal} onClick={clearFilters}>
-              Clear
-            </Button>
-            {activeFilterCount ? (
-              <span className="small muted">
-                {activeFilterCount} filter{activeFilterCount === 1 ? '' : 's'} active
-              </span>
-            ) : null}
           </div>
-        </form>
+        </div>
       </Card>
 
       {error ? (
@@ -222,25 +181,25 @@ export function MarketplacePage() {
         </div>
       ) : null}
 
-      <div className="spread mt-5">
+      <div className="spread mt-4">
         <strong className="small">
-          {data?.pagination?.total ?? 0} open listing{data?.pagination?.total === 1 ? '' : 's'}
+          {data?.pagination?.total ?? 0} available surplus listing{data?.pagination?.total === 1 ? '' : 's'}
         </strong>
-        <Button variant="ghost" size="sm" onClick={reload}>
+        <Button variant="ghost" size="sm" icon={RefreshCw} onClick={reload}>
           Refresh
         </Button>
       </div>
 
       {loading ? (
         <div className="mt-4">
-          <LoadingBlock label="Searching open listings…" />
+          <LoadingBlock label="Loading available surplus listings…" />
         </div>
       ) : view === 'map' ? (
         <div className="mt-4">
           <MapView
             points={mapPoints}
             height={480}
-            emptyMessage="No listings with coordinates matched your filters. Try clearing the city filter or widening the search."
+            emptyMessage="No available listings with coordinates found."
           />
           <p className="tiny muted mt-3">
             Distances shown in listing cards are straight-line estimates, not driving distances.
@@ -253,22 +212,31 @@ export function MarketplacePage() {
               <Card key={idOf(donation)} className="card-hover">
                 <div className="card-body stack">
                   <div className="spread">
-                    <StatusBadge status={donation.status} />
-                    <Badge variant="info">{humanize(donation.foodCategory)}</Badge>
+                    <div className="row" style={{ gap: 'var(--space-2)' }}>
+                      <StatusBadge status={donation.status} />
+                      {donation.distanceKm != null ? (
+                        <Badge
+                          variant={donation.distanceKm <= 3 ? 'success' : donation.distanceKm <= 10 ? 'info' : 'neutral'}
+                          icon={MapPin}
+                        >
+                          {donation.formattedDistance || `${donation.distanceKm} km away`}
+                        </Badge>
+                      ) : null}
+                    </div>
+                    <span className="tiny muted">{humanize(donation.foodCategory)}</span>
                   </div>
 
-                  <div>
-                    <Link to={`/donations/${idOf(donation)}`} className="strong" style={{ fontSize: 'var(--text-lg)' }}>
-                      {donation.title}
-                    </Link>
-                    <p className="tiny muted mt-2">
-                      {donation.donor?.name}
-                      {donation.distanceKm !== undefined ? ` · ${donation.distanceKm} km away` : ''}
-                    </p>
+                  <h3 style={{ fontSize: 'var(--text-lg)', margin: 0 }}>
+                    <Link to={`/donations/${idOf(donation)}`}>{donation.title}</Link>
+                  </h3>
+
+                  <div className="small muted">
+                    {donation.donor?.name || 'Verified donor'}
+                    {donation.donor?.city ? ` · ${donation.donor.city}` : ''}
                   </div>
 
                   <AllocationMeter
-                    quantity={donation.quantity}
+                    total={donation.quantity}
                     available={donation.availableQuantity}
                     reserved={donation.reservedQuantity}
                     collected={donation.collectedQuantity}
@@ -311,18 +279,13 @@ export function MarketplacePage() {
         </>
       ) : (
         <EmptyState
-          icon={Search}
-          title="No listings match your filters"
-          description="Open listings appear here as verified donors publish them. Try clearing filters, or post a demand request so donors can find you."
+          icon={Utensils}
+          title="No surplus food available right now"
+          description="Open listings appear here as soon as verified donors publish surplus food in the network."
           action={
-            <div className="row">
-              <Button variant="secondary" onClick={clearFilters}>
-                Clear filters
-              </Button>
-              <LinkButton to="/demand-requests" variant="primary">
-                Post a demand request
-              </LinkButton>
-            </div>
+            <Button variant="primary" icon={RefreshCw} onClick={reload}>
+              Refresh listings
+            </Button>
           }
         />
       )}

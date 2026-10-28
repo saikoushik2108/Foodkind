@@ -269,7 +269,7 @@ export function DonationFormPage() {
     toast.success('Suggestion applied. Review every field before publishing.');
   }
 
-  async function onSubmit(values) {
+  async function onSubmit(values, publishNow = true) {
     setFormError('');
     const payload = {
       title: values.title,
@@ -303,18 +303,22 @@ export function DonationFormPage() {
       donorContactMethod: values.donorContactMethod,
       images: images.map((image) => ({ url: image.url, originalName: image.originalName })),
       predictionLog: values.predictionLog || null,
+      publishNow,
+      status: publishNow ? 'AVAILABLE' : 'DRAFT',
     };
 
     try {
       const saved = await (isEdit ? donationApi.update(id, payload) : donationApi.create(payload));
       const donationId = saved._id || saved.id || id;
-      toast.success(isEdit ? 'Listing updated.' : 'Draft saved.');
-      if (isEdit) {
-        navigate(`/donations/${donationId}`);
-      } else {
-        toast.info('Publish the listing when you are ready for recipients to see it.');
-        navigate(`/donations/${donationId}`);
+      if (publishNow && saved.status === 'DRAFT') {
+        try {
+          await donationApi.publish(donationId);
+        } catch {
+          // ignore if already published
+        }
       }
+      toast.success(publishNow ? 'Surplus listing published! It is now live for recipients.' : 'Draft saved.');
+      navigate(`/donations/${donationId}`);
     } catch (error) {
       setFormError(error.message);
     }
@@ -659,17 +663,30 @@ export function DonationFormPage() {
           </div>
         </Card>
 
-        <div className="row-wrap">
-          <Button type="submit" variant="primary" size="lg" loading={isSubmitting}>
-            {isEdit ? 'Save changes' : 'Save draft'}
+        <div className="row-wrap" style={{ gap: 'var(--space-3)' }}>
+          <Button
+            type="button"
+            variant="primary"
+            size="lg"
+            loading={isSubmitting}
+            icon={Sparkles}
+            onClick={handleSubmit((v) => onSubmit(v, true))}
+          >
+            {isEdit ? 'Save and publish' : 'Publish surplus listing'}
           </Button>
-          <Button type="button" variant="secondary" onClick={() => navigate(-1)}>
+          <Button
+            type="button"
+            variant="secondary"
+            loading={isSubmitting}
+            onClick={handleSubmit((v) => onSubmit(v, false))}
+          >
+            Save as draft
+          </Button>
+          <Button type="button" variant="ghost" onClick={() => navigate(-1)}>
             Cancel
           </Button>
           <span className="small muted">
-            {isEdit
-              ? 'Drafts and unallocated listings can be edited; once food is reserved the listing is frozen.'
-              : 'Saving creates a draft. Publish it from the listing page when it is ready.'}
+            Publishing immediately makes food visible in recipient and volunteer dashboards.
           </span>
         </div>
       </form>

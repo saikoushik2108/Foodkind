@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   AlertTriangle,
@@ -5,10 +6,13 @@ import {
   Building2,
   CheckCircle2,
   ClipboardList,
+  Compass,
   HeartHandshake,
   KeyRound,
   MapPin,
+  Navigation,
   Package,
+  RefreshCw,
   Search,
   ShieldCheck,
   Sparkles,
@@ -19,6 +23,7 @@ import {
 import { useAuth } from '../context/AuthContext.jsx';
 import { analyticsApi, donationApi, pickupApi, reservationApi, demandApi } from '../api/resources.js';
 import { useApi } from '../hooks/useApi.js';
+import { useCurrentLocation } from '../hooks/useCurrentLocation.js';
 import {
   Alert,
   AllocationMeter,
@@ -39,23 +44,45 @@ import {
 } from '../components/ui.jsx';
 import { ComparisonBarChart, SurplusAreaChart } from '../components/Charts.jsx';
 
-const idOf = (record) => record?.id || record?._id;
+const idOf = (record) => {
+  if (!record) return null;
+  if (typeof record === 'string') return record;
+  return record.id || record._id || null;
+};
 
 /** Landing page for every signed-in user, assembled per role with seamless cross-dashboard integration. */
 export function DashboardPage() {
   const { user, organization, isAdmin, isDonor, isRecipient, isPartner, isVolunteer, isAgent, isVerified } = useAuth();
 
-  const overview = useApi(() => analyticsApi.overview(), []);
-  const myDonations = useApi(() => (isDonor ? donationApi.mine({ limit: 5, sort: 'newest' }) : Promise.resolve(null)), [isDonor]);
-  const myReservations = useApi(() => reservationApi.mine({ limit: 5 }), []);
-  const myPickups = useApi(() => pickupApi.mine({ limit: 6 }), []);
+  const { coords, source: geoSource, isDetecting: isDetectingGeo, detectLocation, statusMessage: geoMessage } = useCurrentLocation();
+  const overview = useApi(() => analyticsApi.overview(), [], { pollInterval: 8000 });
+  const myDonations = useApi(() => (isDonor ? donationApi.mine({ limit: 5, sort: 'newest' }) : Promise.resolve(null)), [isDonor], { pollInterval: 8000 });
+  const myReservations = useApi(() => reservationApi.mine({ limit: 5 }), [], { pollInterval: 8000 });
+  const myPickups = useApi(() => pickupApi.mine({ limit: 6 }), [], { pollInterval: 8000 });
   const openMarketplace = useApi(
-    () => ((isRecipient || isAgent || isPartner) ? donationApi.list({ limit: 4, sort: 'deadline' }) : Promise.resolve(null)),
-    [isRecipient, isAgent, isPartner]
+    () => ((isRecipient || isAgent || isPartner || isVolunteer) ? donationApi.list({ limit: 4, sort: 'distance', lat: coords?.lat, lng: coords?.lng }) : Promise.resolve(null)),
+    [isRecipient, isAgent, isPartner, isVolunteer, coords?.lat, coords?.lng],
+    { pollInterval: 8000 }
+  );
+  const [radiusFilter, setRadiusFilter] = useState(25);
+  const nearbySurplus = useApi(
+    () =>
+      (isAgent || isVolunteer || isPartner || isRecipient)
+        ? donationApi.list({
+            limit: 6,
+            sort: 'distance',
+            lat: coords?.lat,
+            lng: coords?.lng,
+            radiusKm: radiusFilter,
+          })
+        : Promise.resolve(null),
+    [isAgent, isVolunteer, isPartner, isRecipient, coords?.lat, coords?.lng, radiusFilter],
+    { pollInterval: 8000 }
   );
   const openDemand = useApi(
     () => ((isDonor || isAgent || isPartner || isAdmin) ? demandApi.open({ limit: 4 }) : Promise.resolve(null)),
-    [isDonor, isAgent, isPartner, isAdmin]
+    [isDonor, isAgent, isPartner, isAdmin],
+    { pollInterval: 8000 }
   );
 
   const totals = overview.data?.impact?.totals;
@@ -80,9 +107,9 @@ export function DashboardPage() {
           ? 'Rescue & Logistics Agent'
           : 'Member';
 
-  // Active in-progress pickups for agent/transporter
+  // Active in-progress pickups for agent/transporter/volunteer
   const activeTasks = (myPickups.data?.items || []).filter((task) =>
-    ['ASSIGNED', 'ARRIVED', 'COLLECTED'].includes(task.status)
+    ['PENDING_ACCEPTANCE', 'ASSIGNED', 'ARRIVED', 'COLLECTED'].includes(task.status)
   );
 
   return (
@@ -208,7 +235,7 @@ export function DashboardPage() {
             }
           >
             {organization.verificationStatus === 'PENDING'
-              ? 'You can complete your profile and upload documents now. Publishing surplus and claiming food unlock once an administrator approves your organization. (Testing tip: sign in as admin@foodkind.local / DevAdmin!123 to approve any pending organization in 1 click).'
+              ? 'You can complete your profile and upload documents now. Publishing surplus and claiming food unlock once an administrator approves your organization.'
               : 'Check your organization page for the reviewer’s notes before resubmitting.'}
           </Alert>
         </div>
@@ -219,6 +246,44 @@ export function DashboardPage() {
           {overview.error.message}
         </Alert>
       ) : null}
+
+      {/* Active Arrived Handover Code Alert for Donors */}
+      {isDonor && (myPickups.data?.items || []).filter((t) => t.status === 'ARRIVED').map((t) => (
+        <div key={idOf(t)} className="card card-pad mb-4" style={{ background: '#f0fdf4', border: '2px solid #16a34a', marginBottom: 'var(--space-4)' }}>
+          <div className="spread">
+            <span className="strong" style={{ color: '#166534', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <KeyRound size={20} /> Collector Has Arrived — Handover Code
+            </span>
+            <Badge variant="success">Active Collector at Premises</Badge>
+          </div>
+          <p className="small mt-1" style={{ color: '#14532d' }}>
+            The assigned collector for &quot;<strong>{t.donation?.title || 'Food Listing'}</strong>&quot; has arrived. Provide this 6-digit code to the collector to authorize handover:
+          </p>
+          <div
+            style={{
+              fontSize: '2.5rem',
+              fontWeight: 800,
+              letterSpacing: '0.3em',
+              textAlign: 'center',
+              padding: '0.75rem',
+              background: '#ffffff',
+              borderRadius: '8px',
+              border: '2px dashed #16a34a',
+              color: '#15803d',
+              fontFamily: 'monospace',
+              margin: '0.5rem 0',
+            }}
+          >
+            {t.handoverCode || '------'}
+          </div>
+          <div className="spread mt-2">
+            <span className="tiny muted">Destination: {t.recipient?.name || 'Recipient Kitchen'}</span>
+            <LinkButton to={`/pickups/${idOf(t)}`} size="sm" variant="primary">
+              View Pickup Details
+            </LinkButton>
+          </div>
+        </div>
+      ))}
 
       {/* 4 Core Stat Cards */}
       <div className="grid grid-4">
@@ -337,7 +402,13 @@ export function DashboardPage() {
 
                       <div className="table-actions mt-2">
                         <LinkButton to={`/pickups/${idOf(task)}`} size="sm" variant="primary" icon={Truck}>
-                          {task.status === 'ASSIGNED' ? 'Start collection' : task.status === 'ARRIVED' ? 'Enter handover code' : 'Deliver to recipient'}
+                          {task.isAvailableToAccept || !task.assignedTo || task.status === 'PENDING_ACCEPTANCE'
+                            ? 'Accept pickup mission'
+                            : task.status === 'ASSIGNED'
+                              ? 'Confirm arrival / Pickup'
+                              : task.status === 'ARRIVED'
+                                ? 'Enter handover code'
+                                : 'Deliver to recipient'}
                         </LinkButton>
                         {task.donation ? (
                           <LinkButton to={`/donations/${idOf(task.donation)}`} size="sm" variant="ghost">
@@ -353,6 +424,165 @@ export function DashboardPage() {
                     title="No active missions right now"
                     description="You are all caught up! Check the available food surplus marketplace to claim or transport food."
                     action={<LinkButton to="/marketplace" size="sm">Browse available surplus</LinkButton>}
+                  />
+                )}
+              </div>
+            </Card>
+          ) : null}
+
+          {/* Nearby Surplus Food for Volunteers & Agents */}
+          {(isAgent || isPartner || isVolunteer) ? (
+            <Card>
+              <CardHeader
+                title="Nearby Surplus Food Ready for Rescue"
+                subtitle="Live surplus available around your location, sorted by shortest distance."
+                action={
+                  <Link to="/marketplace" className="small">
+                    Explore all ({nearbySurplus.data?.pagination?.total ?? nearbySurplus.data?.items?.length ?? 0})
+                  </Link>
+                }
+              />
+              <div className="card-body stack">
+                {/* Location Status Bar */}
+                <div
+                  className="spread row-wrap"
+                  style={{
+                    background: 'var(--surface-muted)',
+                    padding: 'var(--space-3) var(--space-4)',
+                    borderRadius: 'var(--radius-md)',
+                    border: '1px solid var(--border)',
+                    gap: 'var(--space-2)',
+                  }}
+                >
+                  <div className="row" style={{ gap: 'var(--space-2)', minWidth: 220 }}>
+                    <span
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        width: 28,
+                        height: 28,
+                        borderRadius: '50%',
+                        background: geoSource === 'gps' ? 'var(--green-muted)' : 'var(--surface)',
+                        color: geoSource === 'gps' ? 'var(--green)' : 'var(--primary)',
+                      }}
+                    >
+                      <MapPin size={16} aria-hidden="true" />
+                    </span>
+                    <div>
+                      <div className="small strong">
+                        Near {coords?.label || 'Your Location'}
+                        <Badge variant={geoSource === 'gps' ? 'success' : 'neutral'} style={{ marginLeft: 'var(--space-2)' }}>
+                          {geoSource === 'gps' ? 'Live GPS' : 'Base Station'}
+                        </Badge>
+                      </div>
+                      <div className="tiny muted">
+                        {coords?.lat ? `${coords.lat.toFixed(4)}, ${coords.lng.toFixed(4)}` : 'Location active'}
+                        {geoMessage ? ` · ${geoMessage}` : ''}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="row" style={{ gap: 'var(--space-2)' }}>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      icon={RefreshCw}
+                      loading={isDetectingGeo}
+                      onClick={detectLocation}
+                      title="Refresh Device GPS Location"
+                    >
+                      Detect GPS
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Nearby Listings Grid */}
+                {nearbySurplus.loading ? (
+                  <LoadingBlock label="Detecting nearby surplus listings within radius…" />
+                ) : nearbySurplus.data?.items?.length ? (
+                  <div className="grid grid-2" style={{ gap: 'var(--space-3)' }}>
+                    {nearbySurplus.data.items.slice(0, 6).map((donation) => (
+                      <div
+                        key={idOf(donation)}
+                        className="card card-pad stack-sm card-hover"
+                        style={{
+                          background: 'var(--surface)',
+                          border: '1px solid var(--border)',
+                          position: 'relative',
+                        }}
+                      >
+                        <div className="spread">
+                          <Badge
+                            variant={
+                              donation.distanceKm != null && donation.distanceKm <= 2
+                                ? 'success'
+                                : donation.distanceKm <= 6
+                                  ? 'info'
+                                  : 'neutral'
+                            }
+                            icon={MapPin}
+                          >
+                            {donation.formattedDistance || (donation.distanceKm != null ? `${donation.distanceKm} km away` : 'Near you')}
+                          </Badge>
+                          <Badge variant="neutral">{humanize(donation.foodCategory || donation.category)}</Badge>
+                        </div>
+
+                        <div>
+                          <Link to={`/donations/${idOf(donation)}`} className="strong" style={{ fontSize: 'var(--text-md)', display: 'block' }}>
+                            {donation.title}
+                          </Link>
+                          <div className="tiny muted mt-1">
+                            {donation.donor?.name || 'Verified Donor'} · {donation.collectionAddress || donation.pickupAddress || 'Bengaluru'}
+                          </div>
+                        </div>
+
+                        <AllocationMeter
+                          quantity={donation.quantity}
+                          available={donation.availableQuantity}
+                          reserved={donation.reservedQuantity}
+                          collected={donation.collectedQuantity}
+                          label={`${formatQuantity(donation.remainingQuantity, donation.unit)} available`}
+                        />
+
+                        <div className="spread tiny muted">
+                          <span>
+                            {humanize(donation.storageRequirement)} · {humanize(donation.dietaryClassification)}
+                          </span>
+                          <span>
+                            Until {formatDate(donation.collectionDeadline, { withTime: true })}
+                          </span>
+                        </div>
+
+                        <div className="table-actions mt-1">
+                          <LinkButton
+                            to={`/donations/${idOf(donation)}`}
+                            size="sm"
+                            variant="primary"
+                            icon={Package}
+                            className="btn-block"
+                          >
+                            Rescue / View details
+                          </LinkButton>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <EmptyState
+                    icon={MapPin}
+                    title={`No surplus food found within ${radiusFilter} km`}
+                    description="No active listings match this radius right now. Expand your search radius or inspect the city marketplace."
+                    action={
+                      <div className="row" style={{ gap: 'var(--space-2)' }}>
+                        <Button size="sm" variant="secondary" onClick={() => setRadiusFilter(50)}>
+                          Expand to 50 km
+                        </Button>
+                        <LinkButton to="/marketplace" size="sm" variant="primary">
+                          Open full marketplace
+                        </LinkButton>
+                      </div>
+                    }
                   />
                 )}
               </div>
@@ -554,9 +784,13 @@ export function DashboardPage() {
           ) : null}
 
           {/* Recipient & Agent: Available surplus near you */}
-          {(isRecipient || isAgent || isPartner) ? (
+          {(isRecipient || isAgent || isPartner || isVolunteer) ? (
             <Card>
-              <CardHeader title="Available surplus near you" action={<Link to="/marketplace" className="small">Open marketplace</Link>} />
+              <CardHeader
+                title="Available surplus near you"
+                subtitle={coords?.label ? `Sorted by proximity to ${coords.label}` : undefined}
+                action={<Link to="/marketplace" className="small">Open find surplus</Link>}
+              />
               <div className="card-body stack-sm">
                 {openMarketplace.loading ? (
                   <LoadingBlock label="Loading nearby food…" />
@@ -568,6 +802,7 @@ export function DashboardPage() {
                           {donation.title}
                         </Link>
                         <div className="tiny muted">
+                          {donation.distanceKm != null ? `${donation.distanceKm} km away · ` : ''}
                           {formatQuantity(donation.remainingQuantity, donation.unit)} remaining ·{' '}
                           {donation.donor?.name}
                         </div>
@@ -629,16 +864,16 @@ export function DashboardPage() {
                   </LinkButton>
                 </>
               ) : null}
-              {(isAgent || isPartner) ? (
+              {(isAgent || isPartner || isVolunteer) ? (
                 <>
                   <LinkButton to="/pickups" variant="secondary" icon={Truck} className="btn-block">
                     Rescue pickup missions
                   </LinkButton>
+                  <LinkButton to="/marketplace?sort=distance" variant="secondary" icon={MapPin} className="btn-block">
+                    Nearby surplus food
+                  </LinkButton>
                   <LinkButton to="/marketplace" variant="secondary" icon={Search} className="btn-block">
                     Browse city surplus
-                  </LinkButton>
-                  <LinkButton to="/demand-requests" variant="secondary" icon={HeartHandshake} className="btn-block">
-                    View shelter demand
                   </LinkButton>
                 </>
               ) : null}

@@ -10,8 +10,8 @@ const pickupTaskSchema = new mongoose.Schema({
   assignmentType: { type: String, enum: ['VOLUNTEER','PARTNER','RECIPIENT_SELF_PICKUP'], default: 'RECIPIENT_SELF_PICKUP' },
   status: {
     type: String,
-    enum: ['ASSIGNED','ARRIVED','COLLECTED','DELIVERED','COMPLETED','FAILED','CANCELLED'],
-    default: 'ASSIGNED',
+    enum: ['PENDING_ACCEPTANCE','ASSIGNED','ARRIVED','COLLECTED','DELIVERED','COMPLETED','FAILED','CANCELLED'],
+    default: 'PENDING_ACCEPTANCE',
   },
   handoverCode:  { type: String, default: '' },
   quantity:      { type: Number, required: true },
@@ -20,6 +20,7 @@ const pickupTaskSchema = new mongoose.Schema({
   scheduledAt:   { type: Date },
   windowStart:   { type: Date },
   windowEnd:     { type: Date },
+  acceptedAt:    { type: Date },
   arrivedAt:     { type: Date },
   collectedAt:   { type: Date },
   deliveredAt:   { type: Date },

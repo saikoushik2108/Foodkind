@@ -15,6 +15,24 @@ export default defineConfig({
       '/api': {
         target: API_TARGET,
         changeOrigin: false,
+        configure: (proxy) => {
+          proxy.on('error', (err, _req, res) => {
+            console.error('[vite proxy error]', err.message);
+            if (res && typeof res.writeHead === 'function' && !res.headersSent) {
+              res.writeHead(503, { 'Content-Type': 'application/json' });
+              res.end(
+                JSON.stringify({
+                  success: false,
+                  error: {
+                    message:
+                      'Cannot reach backend server on port 5050. Please ensure the backend is running (run "node src/server.js" in the backend directory).',
+                    code: 'BACKEND_OFFLINE',
+                  },
+                })
+              );
+            }
+          });
+        },
       },
       '/uploads': {
         target: API_TARGET,

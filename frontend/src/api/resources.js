@@ -52,7 +52,7 @@ export const donationApi = {
 /* ── Reservations ────────────────────────────────────────────────────── */
 export const reservationApi = {
   mine: (params) => api.get(`/reservations/mine${toQuery(params)}`).then(unwrapList),
-  get: (id) => api.get(`/reservations/${id}`).then(unwrapList),
+  get: (id) => api.get(`/reservations/${id}`).then(unwrap),
   accept: (id) => api.post(`/reservations/${id}/accept`, {}).then(unwrap),
   decline: (id, reason) => api.post(`/reservations/${id}/decline`, { reason }).then(unwrap),
   cancel: (id, reason) => api.post(`/reservations/${id}/cancel`, { reason }).then(unwrap),
@@ -73,7 +73,9 @@ export const demandApi = {
 /* ── Pickups ─────────────────────────────────────────────────────────── */
 export const pickupApi = {
   mine: (params) => api.get(`/pickups/mine${toQuery(params)}`).then(unwrapList),
-  get: (id) => api.get(`/pickups/${id}`).then(unwrapList),
+  get: (id) => api.get(`/pickups/${id}`).then(unwrap),
+  accept: (id) => api.post(`/pickups/${id}/accept`, {}).then(unwrap),
+  decline: (id) => api.post(`/pickups/${id}/decline`, {}).then(unwrap),
   assign: (id, assignedTo) => api.post(`/pickups/${id}/assign`, { assignedTo }).then(unwrap),
   confirmArrival: (id) => api.post(`/pickups/${id}/confirm-arrival`, {}).then(unwrap),
   verifyPickup: (id, code) => api.post(`/pickups/${id}/verify-pickup`, { code }).then(unwrap),

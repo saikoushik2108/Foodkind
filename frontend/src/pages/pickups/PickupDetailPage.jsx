@@ -26,14 +26,18 @@ import {
 import { MapView } from '../../components/MapView.jsx';
 import { INCIDENT_TYPES } from '../../constants/domain.js';
 
-const idOf = (record) => record?.id || record?._id;
+const idOf = (record) => {
+  if (!record) return null;
+  if (typeof record === 'string') return record;
+  return record.id || record._id || null;
+};
 
 const STAGES = ['ASSIGNED', 'ARRIVED', 'COLLECTED', 'DELIVERED', 'COMPLETED'];
 
 /** One pickup task: the handover workflow in order, with the guardrails visible. */
 export function PickupDetailPage() {
   const { id } = useParams();
-  const { user, organization, isAdmin } = useAuth();
+  const { user, organization, isAdmin, isDonor, isVolunteer, isAgent, isPartner, isRecipient } = useAuth();
   const toast = useToast();
 
   const [busy, setBusy] = useState(false);
@@ -44,8 +48,8 @@ export function PickupDetailPage() {
   const [issueForm, setIssueForm] = useState({ reason: '', type: 'MISSED_PICKUP', quantityAffected: '' });
 
   const { data, error, loading, reload } = useApi(() => pickupApi.get(id), [id]);
-  const task = data;
-  const meta = data?.meta;
+  const task = data?.items && !data?._id ? (Array.isArray(data.items) ? data.items[0] : data.items) : data;
+  const meta = task?.meta || data?.meta;
 
   if (loading) {
     return (
@@ -71,10 +75,13 @@ export function PickupDetailPage() {
   }
 
   const orgId = idOf(organization);
-  const assignedToMe = idOf(task.assignedTo) === idOf(user);
-  const isDonorSide = idOf(task.donor) === orgId || isAdmin;
-  const isRecipientSide = idOf(task.recipient) === orgId || isAdmin;
-  const currentStage = STAGES.indexOf(task.status);
+  const assignedToMe = Boolean(idOf(task.assignedTo) && idOf(user) && idOf(task.assignedTo) === idOf(user));
+  const isDonorSide = Boolean((orgId && idOf(task.donor) === orgId) || (isDonor && !isVolunteer && !isAgent) || isAdmin);
+  const isRecipientSide = Boolean((orgId && idOf(task.recipient) === orgId) || (isRecipient && !isVolunteer && !isAgent) || isAdmin);
+  const isUnassigned = !task.assignedTo || !idOf(task.assignedTo) || task.status === 'PENDING_ACCEPTANCE';
+  const canAccept = (isVolunteer || isAgent || isPartner || isAdmin) && isUnassigned && !['COMPLETED', 'FAILED', 'CANCELLED'].includes(task.status);
+  const isCollectorSide = Boolean(assignedToMe || isVolunteer || isAgent || isPartner || isAdmin);
+  const currentStage = Math.max(0, STAGES.indexOf(task.status));
 
   async function run(action, successMessage, failureTitle) {
     setBusy(true);
@@ -130,9 +137,11 @@ export function PickupDetailPage() {
       />
 
       <div className="row-wrap" style={{ marginBottom: 'var(--space-5)' }}>
-        <StatusBadge status={task.status} />
-        <Badge variant="neutral">{humanize(task.assignmentType)}</Badge>
-        {meta?.codeActive ? <Badge variant="success">Handover code active</Badge> : null}
+        <StatusBadge status={task.status === 'PENDING_ACCEPTANCE' ? 'PENDING' : task.status} />
+        <Badge variant={isUnassigned ? 'warning' : 'neutral'}>
+          {isUnassigned ? 'Available Mission (Unassigned)' : humanize(task.assignmentType)}
+        </Badge>
+        {task.status === 'ARRIVED' ? <Badge variant="success">Handover code active</Badge> : null}
         <Badge variant="info">{meta?.distanceType === 'straight-line' ? 'Straight-line distance' : 'Distance'}</Badge>
       </div>
 
@@ -152,7 +161,13 @@ export function PickupDetailPage() {
                   <div>
                     <div className="small strong">{humanize(stage)}</div>
                     <div className="tiny muted">
-                      {event ? formatDate(event.at, { withTime: true }) : index <= currentStage ? 'In progress' : 'Not reached yet'}
+                      {stage === 'ASSIGNED' && isUnassigned
+                        ? 'Awaiting volunteer acceptance'
+                        : event
+                          ? formatDate(event.at, { withTime: true })
+                          : index <= currentStage
+                            ? 'In progress'
+                            : 'Not reached yet'}
                       {event?.note ? ` · ${event.note}` : ''}
                     </div>
                   </div>
@@ -233,114 +248,239 @@ export function PickupDetailPage() {
           <Card>
             <CardHeader title="Actions" subtitle="Only the next valid step is offered." />
             <div className="card-body stack-sm">
-              {task.status === 'ASSIGNED' ? (
-                <>
-                  <p className="small muted">
-                    Confirm arrival when the collector reaches the donor. That issues a one-time handover code to the
-                    donor, who reads it out to the collector.
-                  </p>
-                  <Button
-                    variant="primary"
-                    icon={Truck}
-                    loading={busy}
-                    onClick={() => run(() => pickupApi.confirmArrival(id), 'Arrival confirmed. The donor has been sent the handover code.', 'Could not confirm arrival')}
-                  >
-                    Confirm arrival
-                  </Button>
-                </>
-              ) : null}
 
-              {task.status === 'ARRIVED' ? (
-                <div className="stack-sm">
-                  <Alert variant="info" title="Enter the handover code">
-                    The donor received a six-digit code. Ask them for it, then enter it here. Codes expire quickly and
-                    repeated wrong entries are rate-limited.
-                  </Alert>
-                  <label className="field">
-                    <span className="field-label">Six-digit handover code</span>
-                    <input
-                      className="input mono"
-                      inputMode="numeric"
-                      pattern="\d{6}"
-                      maxLength={6}
-                      value={code}
-                      onChange={(event) => setCode(event.target.value.replace(/\D/g, ''))}
-                      placeholder="000000"
-                      aria-label="Six-digit handover code"
-                    />
-                  </label>
-                  <Button
-                    variant="primary"
-                    icon={KeyRound}
-                    loading={busy}
-                    disabled={code.length !== 6}
-                    onClick={() =>
-                      run(() => pickupApi.verifyPickup(id, code), 'Handover verified. The food is now recorded as collected.', 'Verification failed')
-                    }
-                  >
-                    Verify and collect
-                  </Button>
-                  <p className="tiny muted">
-                    Collection is recorded against the donation only after the code is verified — possession of this page
-                    is not enough.
+              {/* 1. Accept or Decline Pickup (Volunteers / Partners) */}
+              {canAccept ? (
+                <div
+                  className="card card-pad stack-sm"
+                  style={{
+                    background: 'var(--green-tint)',
+                    border: '1.5px solid var(--green)',
+                    borderRadius: 'var(--radius-md)',
+                  }}
+                >
+                  <div className="spread">
+                    <span className="small strong" style={{ color: 'var(--forest)' }}>
+                      Available Rescue Mission
+                    </span>
+                    <Badge variant="success">Open for Pickup</Badge>
+                  </div>
+                  <p className="small muted">
+                    Would you like to accept this food rescue mission? Once accepted, you will be assigned as the collector to pick up the food from the donor.
                   </p>
+                  <div className="row" style={{ gap: 'var(--space-2)' }}>
+                    <Button
+                      variant="primary"
+                      icon={CheckCircle2}
+                      loading={busy}
+                      onClick={() =>
+                        run(() => pickupApi.accept(id), 'Pickup accepted! You are now the assigned collector.', 'Could not accept pickup')
+                      }
+                    >
+                      Accept pickup
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      disabled={busy}
+                      onClick={() =>
+                        run(() => pickupApi.decline(id), 'Pickup declined.', 'Could not decline pickup')
+                      }
+                    >
+                      Decline
+                    </Button>
+                  </div>
                 </div>
               ) : null}
 
-              {task.status === 'COLLECTED' ? (
+              {/* 2. Confirm Arrival (Assigned Volunteer or Donor) */}
+              {(task.status === 'ASSIGNED' || (task.status === 'PENDING_ACCEPTANCE' && !isUnassigned)) ? (
                 <div className="stack-sm">
-                  <p className="small muted">
-                    The recipient organization confirms how much actually arrived. Record any shortfall honestly — it
-                    becomes an incident record, not a silent loss.
-                  </p>
-                  <Button
-                    variant="primary"
-                    icon={PackageCheck}
-                    disabled={!isRecipientSide}
-                    onClick={() => {
-                      setDeliveryForm({ receivedQuantity: String(task.collectedQuantity || ''), note: '' });
-                      setDeliveryOpen(true);
-                    }}
-                  >
-                    Confirm delivery received
-                  </Button>
-                  {!isRecipientSide ? (
-                    <p className="tiny muted">Only the recipient organization can confirm the received quantity.</p>
+                  {isCollectorSide ? (
+                    <>
+                      <p className="small muted">
+                        Reaching the donor&apos;s premises? Click Confirm arrival to generate the 6-digit handover code on the donor&apos;s screen.
+                      </p>
+                      <Button
+                        variant="primary"
+                        icon={Truck}
+                        loading={busy}
+                        onClick={() =>
+                          run(
+                            () => pickupApi.confirmArrival(id),
+                            'Arrival confirmed! The 6-digit handover code is now active on the donor’s screen.',
+                            'Could not confirm arrival'
+                          )
+                        }
+                      >
+                        Confirm arrival
+                      </Button>
+                    </>
+                  ) : isDonorSide ? (
+                    <>
+                      <p className="small muted">
+                        The collector is en route. When the collector arrives at your facility, click below to generate your 6-digit handover code.
+                      </p>
+                      <Button
+                        variant="primary"
+                        icon={CheckCircle2}
+                        loading={busy}
+                        onClick={() =>
+                          run(
+                            () => pickupApi.confirmArrival(id),
+                            'Arrival confirmed! Your 6-digit handover code is displayed below.',
+                            'Could not confirm arrival'
+                          )
+                        }
+                      >
+                        Confirm collector arrived
+                      </Button>
+                    </>
+                  ) : (
+                    <Alert variant="info" title="Collector En Route">
+                      The assigned collector is travelling to the donor premises.
+                    </Alert>
+                  )}
+                </div>
+              ) : null}
+
+              {/* 3. ARRIVED State: Donor Code Display & Volunteer Code Input */}
+              {task.status === 'ARRIVED' ? (
+                <div className="stack-sm">
+                  {/* PROMINENT HANDOVER CODE FOR DONOR */}
+                  {isDonorSide ? (
+                    <div
+                      className="card card-pad stack-sm"
+                      style={{
+                        background: '#f0fdf4',
+                        border: '2px solid #16a34a',
+                        borderRadius: 'var(--radius-lg)',
+                      }}
+                    >
+                      <div className="spread">
+                        <span className="small strong" style={{ color: '#166534', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <KeyRound size={16} /> Handover Verification Code
+                        </span>
+                        <Badge variant="success">Collector Arrived</Badge>
+                      </div>
+                      <p className="small" style={{ color: '#14532d', margin: '4px 0' }}>
+                        The collector has arrived! Please inspect the food packages and read this 6-digit code to the collector:
+                      </p>
+                      <div
+                        style={{
+                          fontSize: '2.5rem',
+                          fontWeight: 800,
+                          letterSpacing: '0.25em',
+                          textAlign: 'center',
+                          padding: '0.75rem',
+                          background: '#ffffff',
+                          borderRadius: '10px',
+                          border: '2px dashed #16a34a',
+                          color: '#15803d',
+                          fontFamily: 'monospace',
+                          margin: '0.5rem 0',
+                        }}
+                      >
+                        {task.handoverCode || '------'}
+                      </div>
+                      <p className="tiny muted text-center">
+                        The collector must enter this code in their dashboard to confirm pickup handover.
+                      </p>
+                    </div>
+                  ) : null}
+
+                  {/* CODE ENTRY FORM FOR VOLUNTEER / COLLECTOR */}
+                  {isCollectorSide ? (
+                    <div className="stack-sm mt-2">
+                      <Alert variant="info" title="Enter the donor's 6-digit handover code">
+                        Ask the donor for the 6-digit code displayed on their screen, then enter it here to accept the food handover.
+                      </Alert>
+                      <label className="field">
+                        <span className="field-label">Six-digit handover code</span>
+                        <input
+                          className="input mono"
+                          inputMode="numeric"
+                          pattern="\d{6}"
+                          maxLength={6}
+                          value={code}
+                          onChange={(event) => setCode(event.target.value.replace(/\D/g, ''))}
+                          placeholder="000000"
+                          aria-label="Six-digit handover code"
+                          style={{ fontSize: '1.4rem', letterSpacing: '0.25em', textAlign: 'center' }}
+                        />
+                      </label>
+                      <Button
+                        variant="primary"
+                        icon={KeyRound}
+                        loading={busy}
+                        disabled={code.length !== 6}
+                        onClick={() =>
+                          run(
+                            () => pickupApi.verifyPickup(id, code),
+                            'Handover verified! Food pickup accepted and recorded as in transit.',
+                            'Verification failed'
+                          )
+                        }
+                      >
+                        Verify and collect food
+                      </Button>
+                    </div>
                   ) : null}
                 </div>
               ) : null}
 
+              {/* 4. COLLECTED State: Reaching Drop Location & Marking Delivered */}
+              {task.status === 'COLLECTED' ? (
+                <div className="stack-sm">
+                  <Alert variant="info" title="Food is in transit to destination">
+                    Heading to recipient kitchen at: <strong>{task.deliveryAddress}</strong>.
+                    When you reach the drop location, click <strong>Delivered</strong> below to complete the flow.
+                  </Alert>
+                  <Button
+                    variant="primary"
+                    icon={PackageCheck}
+                    loading={busy}
+                    onClick={() =>
+                      run(
+                        () => pickupApi.confirmDelivery(id, { receivedQuantity: task.collectedQuantity || task.quantity }),
+                        'Mission complete! The food has been delivered and recorded.',
+                        'Could not record delivery'
+                      )
+                    }
+                  >
+                    Delivered
+                  </Button>
+                </div>
+              ) : null}
+
+              {/* 5. DELIVERED / COMPLETED State */}
               {['DELIVERED', 'COMPLETED'].includes(task.status) ? (
-                <Alert variant="success" title="This collection is complete">
+                <Alert variant="success" title="This rescue mission is complete!">
                   <div className="stack-sm">
                     <span>
-                      {formatQuantity(task.deliveredQuantity, task.unit)} confirmed received
-                      {task.collectedQuantity && task.deliveredQuantity < task.collectedQuantity
-                        ? ` — short by ${formatQuantity(task.collectedQuantity - task.deliveredQuantity, task.unit)}`
-                        : ''}
-                      .
+                      {formatQuantity(task.deliveredQuantity || task.collectedQuantity, task.unit)} confirmed received at {task.recipient?.name || 'recipient'}.
                     </span>
-                    <span className="tiny muted">The confirmed quantity feeds the impact totals for both organizations.</span>
+                    <span className="tiny muted">Impact metrics have been updated for all organizations in the chain.</span>
                   </div>
                 </Alert>
               ) : null}
 
+              {/* 6. FAILED / CANCELLED State */}
               {['FAILED', 'CANCELLED'].includes(task.status) ? (
                 <Alert variant="danger" title={`This task is ${task.status.toLowerCase()}`}>
                   {task.failure?.reason ? `Reason: ${task.failure.reason}` : 'No completion was recorded.'}
                 </Alert>
               ) : null}
 
+              {/* 7. Problem Reporting */}
               {!['DELIVERED', 'COMPLETED', 'CANCELLED'].includes(task.status) ? (
-                <Button variant="outline-danger" icon={ShieldAlert} onClick={() => setIssueOpen(true)} disabled={busy}>
-                  Report a problem
-                </Button>
+                <div className="mt-2">
+                  <Button variant="outline-danger" icon={ShieldAlert} onClick={() => setIssueOpen(true)} disabled={busy} className="btn-block">
+                    Report a problem
+                  </Button>
+                </div>
               ) : null}
 
-              {assignedToMe ? <p className="tiny muted">You are the assigned collector for this task.</p> : null}
-              {isDonorSide && task.status === 'ARRIVED' ? (
-                <p className="tiny muted">As the donor, you hold the handover code — check your notifications.</p>
-              ) : null}
+              {assignedToMe ? <p className="tiny muted">You are the assigned collector for this mission.</p> : null}
             </div>
           </Card>
 

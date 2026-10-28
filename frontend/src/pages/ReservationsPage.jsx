@@ -44,7 +44,8 @@ export function ReservationsPage() {
 
   const { data, error, loading, reload } = useApi(
     () => reservationApi.mine({ page: pagination.page, limit: pagination.limit, status: status || undefined }),
-    [pagination.page, pagination.limit, status]
+    [pagination.page, pagination.limit, status],
+    { pollInterval: 6000 }
   );
 
   async function act(fn, successMessage, failureTitle) {

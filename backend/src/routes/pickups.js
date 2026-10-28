@@ -30,7 +30,10 @@ export function serializePickupTask(task) {
   }
 
   const history = [];
-  if (obj.createdAt) history.push({ event: 'ASSIGNED', at: obj.createdAt, note: `Task created (${obj.assignmentType})` });
+  if (obj.createdAt) history.push({ event: 'PENDING_ACCEPTANCE', at: obj.createdAt, note: `Task created (${obj.assignmentType})` });
+  if (obj.acceptedAt || (obj.assignedTo && obj.status !== 'PENDING_ACCEPTANCE')) {
+    history.push({ event: 'ASSIGNED', at: obj.acceptedAt || obj.createdAt, note: obj.assignedTo?.name ? `Accepted by ${obj.assignedTo.name}` : 'Assigned to collector' });
+  }
   if (obj.arrivedAt) history.push({ event: 'ARRIVED', at: obj.arrivedAt, note: 'Collector arrived at donor premises' });
   if (obj.collectedAt) history.push({ event: 'COLLECTED', at: obj.collectedAt, note: `Handover verified (${obj.collectedQuantity} ${obj.unit})` });
   if (obj.deliveredAt) history.push({ event: 'DELIVERED', at: obj.deliveredAt, note: `Delivery reached recipient (${obj.deliveredQuantity} ${obj.unit})` });
@@ -39,6 +42,7 @@ export function serializePickupTask(task) {
     history.push({ event: 'FAILED', at: obj.issue.reportedAt, note: obj.issue.description || 'Problem escalated' });
   }
   obj.eventHistory = history;
+  obj.isAvailableToAccept = !obj.assignedTo || obj.status === 'PENDING_ACCEPTANCE';
   obj.meta = {
     codeActive: obj.status === 'ARRIVED',
     distanceType: 'straight-line',
@@ -57,11 +61,13 @@ router.get('/mine', requireAuth, async (req, res, next) => {
     if (req.user.role === 'ADMIN') {
       // Admin sees all
     } else if (isVolunteer) {
-      filter.$or = [
+      const volConditions = [
         { assignedTo: req.user._id },
-        { assignedPartner: orgId },
+        { assignedTo: null }, // Unassigned tasks available for acceptance
         { assignmentType: { $in: ['VOLUNTEER', 'PARTNER'] } },
       ];
+      if (orgId) volConditions.push({ assignedPartner: orgId });
+      filter.$or = volConditions;
     } else if (orgId) {
       filter.$or = [
         { donor: orgId },
@@ -115,6 +121,77 @@ router.get('/:id', requireAuth, async (req, res, next) => {
       .populate('reservation');
     if (!item) return res.status(404).json({ success: false, error: { message: 'Pickup task not found' } });
     res.json({ success: true, data: serializePickupTask(item) });
+  } catch (err) { next(err); }
+});
+
+/* ── Accept Pickup (Volunteer / Partner) ───────────────────────────────── */
+router.post('/:id/accept', requireAuth, async (req, res, next) => {
+  try {
+    const item = await PickupTask.findById(req.params.id)
+      .populate('donation')
+      .populate('donor')
+      .populate('recipient');
+    if (!item) return res.status(404).json({ success: false, error: { message: 'Pickup task not found' } });
+
+    if (['COMPLETED', 'CANCELLED', 'FAILED'].includes(item.status)) {
+      return res.status(422).json({ success: false, error: { message: 'This pickup task is already finished or cancelled.' } });
+    }
+
+    item.assignedTo = req.user._id;
+    if (req.organization) {
+      item.assignedPartner = req.organization._id;
+    }
+    item.status = 'ASSIGNED';
+    item.acceptedAt = new Date();
+    await item.save();
+
+    // Notify donor that volunteer has accepted
+    if (item.donor) {
+      const donorUser = await User.findOne({ organization: item.donor._id });
+      if (donorUser) {
+        await Notification.create({
+          user: donorUser._id,
+          organization: item.donor._id,
+          type: 'PICKUP_ASSIGNED',
+          title: `Volunteer accepted pickup for "${item.donation?.title || 'Surplus Food'}"`,
+          message: `${req.user.name} has accepted the rescue pickup and will arrive during the scheduled pickup window.`,
+          data: { pickupId: item._id },
+        });
+      }
+    }
+
+    const populated = await PickupTask.findById(item._id)
+      .populate('donation')
+      .populate('donor', 'name address location contactEmail contactPhone')
+      .populate('recipient', 'name address location contactEmail contactPhone')
+      .populate('assignedTo', 'name email phone role')
+      .populate('assignedPartner', 'name address');
+
+    res.json({ success: true, data: serializePickupTask(populated) });
+  } catch (err) { next(err); }
+});
+
+/* ── Decline Pickup (Volunteer / Partner) ───────────────────────────────── */
+router.post('/:id/decline', requireAuth, async (req, res, next) => {
+  try {
+    const item = await PickupTask.findById(req.params.id);
+    if (!item) return res.status(404).json({ success: false, error: { message: 'Pickup task not found' } });
+
+    // If currently assigned to this user, unassign them
+    if (item.assignedTo && item.assignedTo.toString() === req.user._id.toString()) {
+      item.assignedTo = null;
+      item.assignedPartner = null;
+      item.status = 'PENDING_ACCEPTANCE';
+      await item.save();
+    }
+
+    const populated = await PickupTask.findById(item._id)
+      .populate('donation')
+      .populate('donor', 'name address location contactEmail contactPhone')
+      .populate('recipient', 'name address location contactEmail contactPhone')
+      .populate('assignedTo', 'name email phone role');
+
+    res.json({ success: true, data: serializePickupTask(populated) });
   } catch (err) { next(err); }
 });
 

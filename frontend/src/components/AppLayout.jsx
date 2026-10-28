@@ -48,8 +48,11 @@ function useNavigation() {
   }
 
   if (isRecipient || isAgent || isVolunteer) {
-    main.push({ to: '/marketplace', label: isAgent ? 'Find surplus' : 'Find food', icon: Search });
-    main.push({ to: '/demand-requests', label: isAgent ? 'Shelter demand' : 'Our demand', icon: HeartHandshake });
+    main.push({ to: '/marketplace', label: 'Find surplus', icon: Search });
+  }
+
+  if (isRecipient) {
+    main.push({ to: '/demand-requests', label: 'Our demand', icon: HeartHandshake });
   }
 
   main.push({ to: '/reservations', label: isDonor ? 'Reservations' : (isAgent ? 'Reservations' : 'Our reservations'), icon: ClipboardList });

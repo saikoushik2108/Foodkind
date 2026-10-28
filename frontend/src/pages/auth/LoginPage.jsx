@@ -113,65 +113,6 @@ export function LoginPage() {
               Sign in
             </Button>
           </form>
-
-          <div className="card card-pad mt-5" style={{ background: 'var(--surface-muted)', border: '1px dashed var(--border-strong)' }}>
-            <span className="tiny muted uppercase" style={{ fontWeight: 700, letterSpacing: '0.06em' }}>
-              Quick Fill Testing Accounts
-            </span>
-            <p className="tiny muted mt-1">
-              Select any role to auto-fill credentials for quick testing:
-            </p>
-            <div className="row-wrap mt-3" style={{ gap: 'var(--space-2)' }}>
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                onClick={() => {
-                  setValue('email', 'admin@foodkind.local');
-                  setValue('password', 'DevAdmin!123');
-                  toast.info('Filled Administrator credentials');
-                }}
-              >
-                👑 Admin
-              </Button>
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                onClick={() => {
-                  setValue('email', 'donor@demo.replate.local');
-                  setValue('password', 'DevUser!123');
-                  toast.info('Filled Donor credentials');
-                }}
-              >
-                🥗 Donor
-              </Button>
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                onClick={() => {
-                  setValue('email', 'hope@demo.replate.local');
-                  setValue('password', 'DevUser!123');
-                  toast.info('Filled Recipient credentials');
-                }}
-              >
-                🍲 Recipient
-              </Button>
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                onClick={() => {
-                  setValue('email', 'volunteer@demo.replate.local');
-                  setValue('password', 'DevUser!123');
-                  toast.info('Filled Volunteer credentials');
-                }}
-              >
-                🚚 Volunteer
-              </Button>
-            </div>
-          </div>
         </div>
       </div>
     </div>

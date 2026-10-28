@@ -6,7 +6,27 @@ import { Organization } from '../models/Organization.js';
 
 const router = Router();
 
-export function serializeDonation(d, callerOrgId, isAdmin) {
+export function calculateDistanceKm(lat1, lon1, lat2, lon2) {
+  if (lat1 == null || lon1 == null || lat2 == null || lon2 == null) return null;
+  const p1 = Number(lat1);
+  const p2 = Number(lat2);
+  const l1 = Number(lon1);
+  const l2 = Number(lon2);
+  if (isNaN(p1) || isNaN(p2) || isNaN(l1) || isNaN(l2)) return null;
+  const R = 6371; // Earth radius in km
+  const dLat = ((p2 - p1) * Math.PI) / 180;
+  const dLon = ((l2 - l1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos((p1 * Math.PI) / 180) *
+      Math.cos((p2 * Math.PI) / 180) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return Math.round(R * c * 10) / 10;
+}
+
+export function serializeDonation(d, callerOrgId, isAdmin, userCoords = null) {
   if (!d) return null;
   const obj = d.toObject ? d.toObject() : { ...d };
   const donorId = obj.donor?._id ? String(obj.donor._id) : String(obj.donor || '');
@@ -21,6 +41,19 @@ export function serializeDonation(d, callerOrgId, isAdmin) {
   obj.deliveredQuantity = ['DELIVERED', 'COMPLETED'].includes(obj.status) ? (obj.actualQuantity || obj.quantity) : 0;
   obj.foodCategory = obj.category;
   obj.confirmedActualQuantity = obj.actualQuantity;
+
+  // Compute distance from user / volunteer location
+  const locCoords = obj.pickupLocation?.coordinates || obj.donor?.location?.coordinates;
+  if (userCoords && Array.isArray(locCoords) && locCoords.length === 2) {
+    // GeoJSON coordinates format is [longitude, latitude]
+    const dist = calculateDistanceKm(userCoords.lat, userCoords.lng, locCoords[1], locCoords[0]);
+    obj.distanceKm = dist;
+    obj.formattedDistance = dist != null ? `${dist} km away` : '';
+  } else {
+    obj.distanceKm = null;
+    obj.formattedDistance = '';
+  }
+
   obj.safetyDeclarations = obj.safetyDeclaration ? {
     preparedInCleanFacility: obj.safetyDeclaration.freshlyPrepared ?? true,
     fitForHumanConsumption: obj.safetyDeclaration.noContamination ?? true,
@@ -86,16 +119,17 @@ router.get('/', requireAuth, async (req, res, next) => {
       filter.pickupArrangement = { $in: ['RECIPIENT_SELF_PICKUP', 'BOTH'] };
     }
 
-    if (lat && lng && radiusKm) {
-      filter.pickupLocation = {
-        $nearSphere: {
-          $geometry: { type: 'Point', coordinates: [Number(lng), Number(lat)] },
-          $maxDistance: Number(radiusKm) * 1000,
-        },
-      };
-    }
+    // Determine caller coordinates: from query params (e.g. browser GPS) or caller organization location
+    const reqLat = lat !== undefined && lat !== '' ? parseFloat(lat) : (req.organization?.location?.coordinates?.[1] ?? null);
+    const reqLng = lng !== undefined && lng !== '' ? parseFloat(lng) : (req.organization?.location?.coordinates?.[0] ?? null);
+    const userCoords = (reqLat != null && reqLng != null && !isNaN(reqLat) && !isNaN(reqLng))
+      ? { lat: reqLat, lng: reqLng }
+      : null;
 
-    filter.bestBefore = { $gt: new Date() };
+    // Filter available food not yet expired
+    if (!status) {
+      filter.bestBefore = { $gt: new Date() };
+    }
 
     let sortObj = { bestBefore: 1 };
     if (sort === 'newest') sortObj = { createdAt: -1 };
@@ -108,17 +142,32 @@ router.get('/', requireAuth, async (req, res, next) => {
       Donation.countDocuments(filter),
     ]);
 
+    const callerOrgId = req.organization?._id;
+    const isAdmin = req.user.role === 'ADMIN';
+    let serializedItems = items.map((item) => serializeDonation(item, callerOrgId, isAdmin, userCoords));
+
     if (city) {
       const cityLower = city.toLowerCase();
-      items = items.filter((d) =>
+      serializedItems = serializedItems.filter((d) =>
         (d.donor?.address?.city || '').toLowerCase().includes(cityLower) ||
         (d.pickupAddress || '').toLowerCase().includes(cityLower)
       );
     }
 
-    const callerOrgId = req.organization?._id;
-    const isAdmin = req.user.role === 'ADMIN';
-    const serializedItems = items.map((item) => serializeDonation(item, callerOrgId, isAdmin));
+    if (radiusKm && userCoords) {
+      const maxDist = parseFloat(radiusKm);
+      if (!isNaN(maxDist) && maxDist > 0) {
+        serializedItems = serializedItems.filter((d) => d.distanceKm == null || d.distanceKm <= maxDist);
+      }
+    }
+
+    if (sort === 'distance' || sort === 'nearest') {
+      serializedItems.sort((a, b) => {
+        if (a.distanceKm == null) return 1;
+        if (b.distanceKm == null) return -1;
+        return a.distanceKm - b.distanceKm;
+      });
+    }
 
     res.json({
       success: true,
@@ -201,7 +250,7 @@ router.post('/', requireAuth, requireOrgType('DONOR'), requireVerified, async (r
       pickupAddress: d.pickupAddress || (req.organization.address?.line ? `${req.organization.address.line}, ${req.organization.address.city}` : ''),
       images: d.images || [],
       safetyDeclaration: d.safetyDeclaration || { properlyStored: true, freshlyPrepared: true, noContamination: true, declaredAt: new Date() },
-      status: 'DRAFT',
+      status: (d.publishNow === false || d.status === 'DRAFT') ? 'DRAFT' : 'AVAILABLE',
       impactEstimate: {
         mealsEquivalent: Math.round(d.quantity * (d.unit === 'KILOGRAMS' ? 2.5 : 1)),
         co2SavedKg: Math.round(d.quantity * (d.unit === 'KILOGRAMS' ? 2.5 : 0.5)),
@@ -229,6 +278,9 @@ router.patch('/:id', requireAuth, requireOrgType('DONOR'), async (req, res, next
       if (req.body[key] !== undefined) donation[key] = req.body[key];
     }
     if (req.body.quantity) donation.remainingQuantity = req.body.quantity;
+    if (req.body.publishNow === true) {
+      donation.status = 'AVAILABLE';
+    }
     await donation.save();
     res.json({ success: true, data: serializeDonation(donation, req.organization._id, false) });
   } catch (err) { next(err); }

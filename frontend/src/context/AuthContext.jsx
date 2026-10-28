@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import { authApi } from '../api/resources.js';
 import { ApiError } from '../api/client.js';
 
-const AuthContext = createContext(null);
+export const AuthContext = createContext(null);
 
 /**
  * Session provider.

@@ -67,17 +67,55 @@ export class ApiError extends Error {
   }
 }
 
+let syncChannel = null;
+try {
+  if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+    syncChannel = new BroadcastChannel('foodkind_data_sync');
+    syncChannel.onmessage = (event) => {
+      if (event.data?.type === 'DATA_CHANGED') {
+        window.dispatchEvent(new CustomEvent('foodkind:datachange', { detail: event.data }));
+      }
+    };
+  }
+} catch {
+  // fallback for unsupported environments
+}
+
+export function broadcastDataChange(entity = 'all') {
+  try {
+    if (syncChannel) {
+      syncChannel.postMessage({ type: 'DATA_CHANGED', entity, timestamp: Date.now() });
+    }
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('foodkind:datachange', { detail: { entity, timestamp: Date.now() } }));
+    }
+  } catch {
+    // ignore
+  }
+}
+
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    const method = response.config?.method?.toLowerCase();
+    if (method && method !== 'get') {
+      broadcastDataChange();
+    }
+    return response;
+  },
   (error) => {
     if (error.response) {
       const { status, data } = error.response;
+      const isProxyError =
+        status === 503 ||
+        (status === 500 && typeof data === 'string' && (data.includes('ECONNREFUSED') || data.includes('proxy error')));
       const message =
         data?.error?.message ||
         data?.message ||
-        (status === 429
-          ? 'Too many requests. Please slow down and try again shortly.'
-          : `Request failed (${status})`);
+        (isProxyError
+          ? 'Backend server is not reachable on port 5050. Please ensure the backend server is running.'
+          : status === 429
+            ? 'Too many requests. Please slow down and try again shortly.'
+            : `Request failed (${status})`);
       throw new ApiError(message, { status, details: data?.error?.details ?? null });
     }
     if (error.code === 'ECONNABORTED') {

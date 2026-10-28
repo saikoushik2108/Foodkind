@@ -10,7 +10,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
  * @param {Array} deps dependency list that should trigger a refetch
  * @param {{ immediate?: boolean }} options
  */
-export function useApi(fetcher, deps = [], { immediate = true } = {}) {
+export function useApi(fetcher, deps = [], { immediate = true, autoSync = true, pollInterval = 0 } = {}) {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(immediate);
@@ -25,18 +25,20 @@ export function useApi(fetcher, deps = [], { immediate = true } = {}) {
     };
   }, []);
 
-  const run = useCallback(async () => {
-    setLoading(true);
-    setError(null);
+  const run = useCallback(async ({ isBackground = false } = {}) => {
+    if (!isBackground) {
+      setLoading(true);
+      setError(null);
+    }
     try {
       const result = await fetcherRef.current();
-      if (mounted.current) setData(result);
+      if (mounted.current && result !== undefined) setData(result);
       return result;
     } catch (err) {
-      if (mounted.current) setError(err);
+      if (mounted.current && !isBackground) setError(err);
       return null;
     } finally {
-      if (mounted.current) setLoading(false);
+      if (mounted.current && !isBackground) setLoading(false);
     }
   }, []);
 
@@ -48,6 +50,47 @@ export function useApi(fetcher, deps = [], { immediate = true } = {}) {
     run();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, deps);
+
+  // Auto-sync simultaneously across tabs and on focus
+  useEffect(() => {
+    if (!autoSync && !pollInterval) return;
+
+    let debounceTimer = null;
+    function handleSync() {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        if (mounted.current) {
+          run({ isBackground: true });
+        }
+      }, 150);
+    }
+
+    if (autoSync && typeof window !== 'undefined') {
+      window.addEventListener('foodkind:datachange', handleSync);
+      window.addEventListener('focus', handleSync);
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') handleSync();
+      });
+    }
+
+    let intervalTimer = null;
+    if (pollInterval > 0) {
+      intervalTimer = setInterval(() => {
+        if (mounted.current && typeof document !== 'undefined' && document.visibilityState !== 'hidden') {
+          run({ isBackground: true });
+        }
+      }, pollInterval);
+    }
+
+    return () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      if (intervalTimer) clearInterval(intervalTimer);
+      if (autoSync && typeof window !== 'undefined') {
+        window.removeEventListener('foodkind:datachange', handleSync);
+        window.removeEventListener('focus', handleSync);
+      }
+    };
+  }, [run, autoSync, pollInterval]);
 
   return { data, error, loading, reload: run, setData };
 }

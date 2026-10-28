@@ -1,11 +1,14 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Clock, MapPin, Truck } from 'lucide-react';
+import { CheckCircle2, Clock, MapPin, Truck } from 'lucide-react';
 import { pickupApi } from '../../api/resources.js';
 import { useApi, usePagination } from '../../hooks/useApi.js';
+import { useAuth } from '../../context/AuthContext.jsx';
+import { useToast } from '../../context/ToastContext.jsx';
 import {
   Alert,
   Badge,
+  Button,
   Card,
   CardHeader,
   EmptyState,
@@ -22,17 +25,38 @@ import {
 } from '../../components/ui.jsx';
 import { PICKUP_STATUSES } from '../../constants/domain.js';
 
-const idOf = (record) => record?.id || record?._id;
+const idOf = (record) => {
+  if (!record) return null;
+  if (typeof record === 'string') return record;
+  return record.id || record._id || null;
+};
 
 /** Everything waiting to be collected or delivered. */
 export function PickupsPage() {
+  const { user, isAdmin, isVolunteer, isAgent, isPartner } = useAuth();
+  const toast = useToast();
   const { pagination, setPage } = usePagination({ page: 1, limit: 10 });
   const [status, setStatus] = useState('');
+  const [busyId, setBusyId] = useState(null);
 
   const { data, error, loading, reload } = useApi(
     () => pickupApi.mine({ page: pagination.page, limit: pagination.limit, status: status || undefined }),
-    [pagination.page, pagination.limit, status]
+    [pagination.page, pagination.limit, status],
+    { pollInterval: 6000 }
   );
+
+  async function handleAccept(taskId) {
+    setBusyId(taskId);
+    try {
+      await pickupApi.accept(taskId);
+      toast.success('Pickup accepted! You are now the assigned collector.');
+      reload();
+    } catch (err) {
+      toast.error(err.message, { title: 'Could not accept pickup' });
+    } finally {
+      setBusyId(null);
+    }
+  }
 
   const active = (data?.items || []).filter((task) => ['ASSIGNED', 'ARRIVED', 'COLLECTED'].includes(task.status));
   const finished = (data?.items || []).filter((task) => !['ASSIGNED', 'ARRIVED', 'COLLECTED'].includes(task.status));
@@ -131,6 +155,17 @@ export function PickupsPage() {
                     </div>
 
                     <div className="table-actions">
+                      {((task.isAvailableToAccept || !task.assignedTo || task.status === 'PENDING_ACCEPTANCE') && (isVolunteer || isAgent || isPartner || isAdmin)) ? (
+                        <Button
+                          size="sm"
+                          variant="primary"
+                          icon={CheckCircle2}
+                          loading={busyId === idOf(task)}
+                          onClick={() => handleAccept(idOf(task))}
+                        >
+                          Accept pickup
+                        </Button>
+                      ) : null}
                       <LinkButton to={`/pickups/${idOf(task)}`} size="sm" variant="secondary" icon={Truck}>
                         Open task
                       </LinkButton>

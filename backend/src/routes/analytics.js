@@ -15,9 +15,21 @@ router.get('/overview', requireAuth, async (req, res, next) => {
     const isAdmin = req.user.role === 'ADMIN';
 
     // Filters per role
-    const donationFilter = isAdmin ? {} : (orgType === 'DONOR' ? { donor: orgId } : {});
-    const reservationFilter = isAdmin ? {} : (orgType === 'RECIPIENT' ? { recipient: orgId } : {});
-    const pickupFilter = isAdmin ? {} : (orgType === 'DONOR' ? { donor: orgId } : (orgType === 'RECIPIENT' ? { recipient: orgId } : { $or: [{ assignedTo: req.user._id }, { assignedPartner: orgId }] }));
+    const donationFilter = isAdmin ? {} : (orgType === 'DONOR' && orgId ? { donor: orgId } : {});
+    const reservationFilter = isAdmin ? {} : (orgType === 'RECIPIENT' && orgId ? { recipient: orgId } : {});
+    
+    let pickupFilter = {};
+    if (!isAdmin) {
+      if (orgType === 'DONOR' && orgId) {
+        pickupFilter = { donor: orgId };
+      } else if (orgType === 'RECIPIENT' && orgId) {
+        pickupFilter = { recipient: orgId };
+      } else {
+        const volunteerOr = [{ assignedTo: req.user._id }];
+        if (orgId) volunteerOr.push({ assignedPartner: orgId });
+        pickupFilter = { $or: volunteerOr };
+      }
+    }
 
     const [
       totalDonations,
@@ -55,7 +67,7 @@ router.get('/overview', requireAuth, async (req, res, next) => {
     } else {
       // Recipient or partner/volunteer agent
       completedPickups.forEach((p) => {
-        const qty = p.deliveredQuantity || p.collectedQuantity || p.quantity;
+        const qty = p.deliveredQuantity || p.collectedQuantity || p.quantity || 0;
         portionsRedistributed += qty;
         kilogramsRedistributed += Math.round(qty * 0.4);
       });
